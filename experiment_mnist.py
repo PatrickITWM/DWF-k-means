@@ -3,25 +3,21 @@
 
 import os
 import random
-import shutil
-from collections import defaultdict
 from itertools import product
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed, Memory
 from sklearn.cluster import KMeans
-from sklearn.datasets import make_blobs
+from sklearn.datasets import make_blobs, fetch_openml
 from sklearn.metrics import accuracy_score, v_measure_score, completeness_score, homogeneity_score
 from tqdm import tqdm
 
 from flkmeans import FLKMeans, KFed, score
 from flkmeans.utils import distribute_to_clients
 from utils import map_pred_to_true
-from functools import lru_cache
 
 # %%
 # Settings
@@ -35,8 +31,8 @@ RESULT_PATH = Path("experiments")
 # -------------------------------------
 N_KERNELS = -1
 # -------------------------------------
-EXPERIMENT = "FEMNIST"
-K = 64
+EXPERIMENT = "MNIST"
+K = 20
 # -------------------------------------
 N_CLIENTS = 100  # Ignored for FEMNIST
 N_CLIENTS_PER_ROUND = range(5, 101, 5)
@@ -48,44 +44,9 @@ STEPS_WITHOUT_IMPROVEMENTS = 300
 REPETITIONS = 100
 MAX_ITER = 10_000
 
-path_iid_data_zip = Path("data femnist/IID_NEW.zip")
-path_half_iid_data_zip = Path("data femnist/HIID_NEW.zip")
-path_non_iid_data_zip = Path("data femnist/NIID_NEW.zip")
-
 
 # %%
 # Definitions
-@memory.cache
-def load_data(path_zip: str | Path) -> dict[int, dict[str, pd.DataFrame]]:
-    """
-    Opens the zip archive into a temporary folder and loads the data into pandas dataframes.
-    The return of this function has the form {client_id: {'data': pd.Dataframe(), 'label': pd.Dataframe()}, ...}
-    """
-    # Create temporary folder in which the data is unpacked
-    print(f"Unpack data of file '{path_zip}'")
-    tmp = TemporaryDirectory()
-    shutil.unpack_archive(path_zip, tmp.name, "zip")
-    # Navigate into the (unique) subfolder
-    subfolder = os.listdir(tmp.name)[0]
-    path_data = Path(tmp.name) / subfolder
-    # Create the data dict
-    print(f"Data successfully unpacked. Load data.")
-
-    data = defaultdict(dict)
-    for i, name in enumerate(os.listdir(path_data)):
-        # we iterate over all files in the dir
-        client_id = int(name.split("_")[0])  # The number at the beginning of the file
-        type_of_content = "data" if "data" in name.lower() else "label"  # data or label
-        # of the file name before the suffix
-        data[client_id][type_of_content] = pd.read_csv(path_data / name, header=None)
-    return data
-
-
-def process_data(data: dict[int, dict[str, pd.DataFrame]]):
-    x_clients = [data[client]["data"] for client in data]
-    X = pd.concat(x_clients, axis=0)
-    y_true = pd.concat([data[client]["label"] for client in data], axis=0)
-    return x_clients, X, y_true.values.flatten().tolist()
 
 
 def create_folder_path_if_necessary(folder_path):
@@ -98,6 +59,14 @@ def create_folder_path_if_necessary(folder_path):
         except OSError as e:  # Guard against race condition
             print(f"Could not create path {folder_path}")
             raise
+
+
+# %%
+# Create data
+
+mnist = fetch_openml("mnist_784", as_frame=False)
+X = mnist.data[:60_000]
+y = mnist.target[:60_000]
 
 
 # %%
@@ -137,15 +106,6 @@ def get_trained_k_means(experiment_name: str,
                         init_method: str,
                         max_iter: int = 10_000,
                         steps_without_improvements: Optional[int] = None):
-    if data_distribution == DATADISTRIBUTION.IID:
-        data = load_data(path_iid_data_zip)
-        data, X, y = process_data(data)
-    elif data_distribution == DATADISTRIBUTION.HIID:
-        data = load_data(path_half_iid_data_zip)
-        data, X, y = process_data(data)
-    else:
-        data = load_data(path_non_iid_data_zip)
-        data, X, y = process_data(data)
     model = KMeans(n_clusters=k,
                    n_init=1,
                    max_iter=max_iter,
@@ -169,14 +129,20 @@ def get_trained_ewf_k_means(experiment_name: str,
                             max_iter: int = 10_000,
                             steps_without_improvements: Optional[int] = None):
     if data_distribution == DATADISTRIBUTION.IID:
-        data = load_data(path_iid_data_zip)
-        data, X, y = process_data(data)
+        data = distribute_to_clients(X,
+                                     n_clients=n_clients,
+                                     mode="random",
+                                     seed=547 * model_number % 7919)
     elif data_distribution == DATADISTRIBUTION.HIID:
-        data = load_data(path_half_iid_data_zip)
-        data, X, y = process_data(data)
+        data = distribute_to_clients(X,
+                                     n_clients=n_clients,
+                                     mode="half",
+                                     seed=547 * model_number % 7919)
     else:
-        data = load_data(path_non_iid_data_zip)
-        data, X, y = process_data(data)
+        data = distribute_to_clients(X,
+                                     n_clients=n_clients,
+                                     mode="clustered",
+                                     seed=547 * model_number % 7919)
     model = FLKMeans(n_clusters=k,
                      max_iter_global=max_iter,
                      min_iter_global=16,
@@ -212,14 +178,20 @@ def get_trained_dwf_k_means(experiment_name: str,
                             max_iter: int = 10_000,
                             steps_without_improvements: Optional[int] = None):
     if data_distribution == DATADISTRIBUTION.IID:
-        data = load_data(path_iid_data_zip)
-        data, X, y = process_data(data)
+        data = distribute_to_clients(X,
+                                     n_clients=n_clients,
+                                     mode="random",
+                                     seed=547 * model_number % 7919)
     elif data_distribution == DATADISTRIBUTION.HIID:
-        data = load_data(path_half_iid_data_zip)
-        data, X, y = process_data(data)
+        data = distribute_to_clients(X,
+                                     n_clients=n_clients,
+                                     mode="half",
+                                     seed=547 * model_number % 7919)
     else:
-        data = load_data(path_non_iid_data_zip)
-        data, X, y = process_data(data)
+        data = distribute_to_clients(X,
+                                     n_clients=n_clients,
+                                     mode="clustered",
+                                     seed=547 * model_number % 7919)
     model = FLKMeans(n_clusters=k,
                      max_iter_global=max_iter,
                      min_iter_global=16,
@@ -255,14 +227,20 @@ def get_trained_k_fed(experiment_name: str,
                       max_iter: int = 10_000,
                       steps_without_improvements: Optional[int] = None):
     if data_distribution == DATADISTRIBUTION.IID:
-        data = load_data(path_iid_data_zip)
-        data, X, y = process_data(data)
+        data = distribute_to_clients(X,
+                                     n_clients=n_clients,
+                                     mode="random",
+                                     seed=547 * model_number % 7919)
     elif data_distribution == DATADISTRIBUTION.HIID:
-        data = load_data(path_half_iid_data_zip)
-        data, X, y = process_data(data)
+        data = distribute_to_clients(X,
+                                     n_clients=n_clients,
+                                     mode="half",
+                                     seed=547 * model_number % 7919)
     else:
-        data = load_data(path_non_iid_data_zip)
-        data, X, y = process_data(data)
+        data = distribute_to_clients(X,
+                                     n_clients=n_clients,
+                                     mode="clustered",
+                                     seed=547 * model_number % 7919)
     model = KFed(n_clusters=k,
                  max_iter_global=max_iter,
                  max_iter_local=max_iter,
@@ -366,15 +344,6 @@ def compute_score(experiment_name: str,
                   max_iter: int = 10_000,
                   steps_without_improvements: Optional[int] = None):
     model = model_dict[(model_type, data_distribution, model_number, n_clients_per_round)]
-    if data_distribution == DATADISTRIBUTION.IID:
-        data = load_data(path_iid_data_zip)
-        data, X, y = process_data(data)
-    elif data_distribution == DATADISTRIBUTION.HIID:
-        data = load_data(path_half_iid_data_zip)
-        data, X, y = process_data(data)
-    else:
-        data = load_data(path_non_iid_data_zip)
-        data, X, y = process_data(data)
     if model_type == MODELTYPE.KMEANS:
         centroids = model.cluster_centers_
     else:
@@ -398,15 +367,6 @@ def compute_accuracy(experiment_name: str,
                      max_iter: int = 10_000,
                      steps_without_improvements: Optional[int] = None):
     model = model_dict[(model_type, data_distribution, model_number, n_clients_per_round)]
-    if data_distribution == DATADISTRIBUTION.IID:
-        data = load_data(path_iid_data_zip)
-        data, X, y = process_data(data)
-    elif data_distribution == DATADISTRIBUTION.HIID:
-        data = load_data(path_half_iid_data_zip)
-        data, X, y = process_data(data)
-    else:
-        data = load_data(path_non_iid_data_zip)
-        data, X, y = process_data(data)
     return accuracy_score(y, map_pred_to_true(y, model.predict(X)))
 
 
@@ -426,15 +386,6 @@ def compute_v_measure(experiment_name: str,
                       max_iter: int = 10_000,
                       steps_without_improvements: Optional[int] = None):
     model = model_dict[(model_type, data_distribution, model_number, n_clients_per_round)]
-    if data_distribution == DATADISTRIBUTION.IID:
-        data = load_data(path_iid_data_zip)
-        data, X, y = process_data(data)
-    elif data_distribution == DATADISTRIBUTION.HIID:
-        data = load_data(path_half_iid_data_zip)
-        data, X, y = process_data(data)
-    else:
-        data = load_data(path_non_iid_data_zip)
-        data, X, y = process_data(data)
     return v_measure_score(y, model.predict(X))
 
 
@@ -454,15 +405,6 @@ def compute_completeness(experiment_name: str,
                          max_iter: int = 10_000,
                          steps_without_improvements: Optional[int] = None):
     model = model_dict[(model_type, data_distribution, model_number, n_clients_per_round)]
-    if data_distribution == DATADISTRIBUTION.IID:
-        data = load_data(path_iid_data_zip)
-        data, X, y = process_data(data)
-    elif data_distribution == DATADISTRIBUTION.HIID:
-        data = load_data(path_half_iid_data_zip)
-        data, X, y = process_data(data)
-    else:
-        data = load_data(path_non_iid_data_zip)
-        data, X, y = process_data(data)
     return completeness_score(y, model.predict(X))
 
 
@@ -482,15 +424,6 @@ def compute_homogeneity(experiment_name: str,
                         max_iter: int = 10_000,
                         steps_without_improvements: Optional[int] = None):
     model = model_dict[(model_type, data_distribution, model_number, n_clients_per_round)]
-    if data_distribution == DATADISTRIBUTION.IID:
-        data = load_data(path_iid_data_zip)
-        data, X, y = process_data(data)
-    elif data_distribution == DATADISTRIBUTION.HIID:
-        data = load_data(path_half_iid_data_zip)
-        data, X, y = process_data(data)
-    else:
-        data = load_data(path_non_iid_data_zip)
-        data, X, y = process_data(data)
     return homogeneity_score(y, model.predict(X))
 
 

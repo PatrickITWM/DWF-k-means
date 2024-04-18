@@ -8,7 +8,7 @@ from matplotlib.axes import Axes
 from sklearn.cluster import KMeans
 from sklearn.model_selection import train_test_split
 
-plt.style.use('seaborn-dark')
+# plt.style.use('seaborn-dark')
 
 
 def distribute_to_clients(X: np.array,
