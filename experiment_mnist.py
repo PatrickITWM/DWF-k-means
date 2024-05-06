@@ -2,22 +2,24 @@
 # Imports
 
 import os
-import random
+import warnings
 from itertools import product
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed, Memory
 from sklearn.cluster import KMeans
-from sklearn.datasets import make_blobs, fetch_openml
+from sklearn.datasets import fetch_openml
 from sklearn.metrics import accuracy_score, v_measure_score, completeness_score, homogeneity_score
 from tqdm import tqdm
 
-from flkmeans import FLKMeans, KFed, score
+from flkmeans import FLKMeans, KFed, score, FKM
 from flkmeans.utils import distribute_to_clients
 from utils import map_pred_to_true
+
+warnings.filterwarnings('ignore')
+os.environ["PYTHONWARNINGS"] = "ignore"
 
 # %%
 # Settings
@@ -29,7 +31,7 @@ memory = Memory("savepoints", verbose=0)
 # -------------------------------------
 RESULT_PATH = Path("experiments")
 # -------------------------------------
-N_KERNELS = -1
+N_KERNELS = 15
 # -------------------------------------
 EXPERIMENT = "MNIST"
 K = 20
@@ -43,6 +45,7 @@ MOMENTUM = 0.8
 STEPS_WITHOUT_IMPROVEMENTS = 300
 REPETITIONS = 100
 MAX_ITER = 10_000
+MAX_ITER_FKM = 1_000
 
 
 # %%
@@ -76,10 +79,11 @@ class MODELTYPE:
     EWFKM = "EWF k-means"
     DWFKM = "DWF k-means"
     KFED = "k-FED"
+    FKM = "FKM"
 
     @classmethod
     def all(cls):
-        return [cls.KMEANS, cls.EWFKM, cls.DWFKM, cls.KFED]
+        return [cls.KMEANS, cls.EWFKM, cls.DWFKM, cls.KFED, cls.FKM]
 
 
 class DATADISTRIBUTION:
@@ -245,8 +249,49 @@ def get_trained_k_fed(experiment_name: str,
                  max_iter_global=max_iter,
                  max_iter_local=max_iter,
                  n_init=1,
-                 num_client_per_round=n_clients,
+                 num_client_per_round=n_clients_per_round,
                  verbose=0)
+    model.fit(data)
+    return model
+
+
+@memory.cache
+def get_trained_fkm(experiment_name: str,
+                    model_number: int,
+                    data_distribution: str,
+                    k: int,
+                    n_clients: int,
+                    n_clients_per_round: int,
+                    lr: float,
+                    momentum: float,
+                    tol_global: float,
+                    tol_local: float,
+                    init_method: str,
+                    max_iter: int = 10_000,
+                    steps_without_improvements: Optional[int] = None):
+    if data_distribution == DATADISTRIBUTION.IID:
+        data = distribute_to_clients(X,
+                                     n_clients=n_clients,
+                                     mode="random",
+                                     seed=547 * model_number % 7919)
+    elif data_distribution == DATADISTRIBUTION.HIID:
+        data = distribute_to_clients(X,
+                                     n_clients=n_clients,
+                                     mode="half",
+                                     seed=547 * model_number % 7919)
+    else:
+        data = distribute_to_clients(X,
+                                     n_clients=n_clients,
+                                     mode="clustered",
+                                     seed=547 * model_number % 7919)
+    model = FKM(n_clusters=k,
+                max_iter_global=max_iter,
+                max_iter_local=5,
+                num_client_per_round=n_clients_per_round,
+                verbose=0,
+                tol_global=tol_global,
+                tol_local=tol_local,
+                seed=model_number)
     model.fit(data)
     return model
 
@@ -265,6 +310,7 @@ def get_trained_model(experiment_name: str,
                       tol_local: float,
                       init_method: str,
                       max_iter: int = 10_000,
+                      max_iter_fkm: int = 1000,
                       steps_without_improvements: Optional[int] = None):
     print(f"{model_type=}, {model_number=}, {data_distribution=}, {n_clients_per_round=}, {experiment_name= }")
     if model_type == MODELTYPE.KMEANS:
@@ -323,6 +369,21 @@ def get_trained_model(experiment_name: str,
                                   init_method,
                                   max_iter,
                                   steps_without_improvements)
+    elif model_type == MODELTYPE.FKM:
+        model = get_trained_fkm(experiment_name,
+                                model_number,
+                                data_distribution,
+                                k,
+                                n_clients,
+                                n_clients_per_round,
+                                lr,
+                                momentum,
+                                tol_global,
+                                tol_local,
+                                init_method,
+                                max_iter_fkm,
+                                steps_without_improvements)
+
     else:
         raise ValueError(f"Unknown model type {model_type}")
     return model
@@ -342,6 +403,7 @@ def compute_score(experiment_name: str,
                   tol_local: float,
                   init_method: str,
                   max_iter: int = 10_000,
+                  max_iter_fkm: int = 1000,
                   steps_without_improvements: Optional[int] = None):
     model = model_dict[(model_type, data_distribution, model_number, n_clients_per_round)]
     if model_type == MODELTYPE.KMEANS:
@@ -365,6 +427,7 @@ def compute_accuracy(experiment_name: str,
                      tol_local: float,
                      init_method: str,
                      max_iter: int = 10_000,
+                     max_iter_fkm: int = 1000,
                      steps_without_improvements: Optional[int] = None):
     model = model_dict[(model_type, data_distribution, model_number, n_clients_per_round)]
     return accuracy_score(y, map_pred_to_true(y, model.predict(X)))
@@ -384,6 +447,7 @@ def compute_v_measure(experiment_name: str,
                       tol_local: float,
                       init_method: str,
                       max_iter: int = 10_000,
+                      max_iter_fkm: int = 1000,
                       steps_without_improvements: Optional[int] = None):
     model = model_dict[(model_type, data_distribution, model_number, n_clients_per_round)]
     return v_measure_score(y, model.predict(X))
@@ -422,6 +486,7 @@ def compute_homogeneity(experiment_name: str,
                         tol_local: float,
                         init_method: str,
                         max_iter: int = 10_000,
+                        max_iter_fkm: int = 1000,
                         steps_without_improvements: Optional[int] = None):
     model = model_dict[(model_type, data_distribution, model_number, n_clients_per_round)]
     return homogeneity_score(y, model.predict(X))
@@ -436,10 +501,11 @@ args = {"experiment_name": EXPERIMENT,
         "tol_local": TOL_LOCAL,
         "init_method": "kfed",
         "max_iter": MAX_ITER,
+        "max_iter_fkm": MAX_ITER_FKM,
         "steps_without_improvements": STEPS_WITHOUT_IMPROVEMENTS}
 
 # Train models
-trained_models = Parallel(n_jobs=N_KERNELS, verbose=20)(
+trained_models = Parallel(n_jobs=N_KERNELS, batch_size=1, verbose=20)(
     delayed(get_trained_model)(model_type=model_type,
                                data_distribution=data_distribution,
                                model_number=model_number,

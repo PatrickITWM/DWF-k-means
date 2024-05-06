@@ -1,1 +1,1 @@
-from ._flkmeans import FLKMeans, KFed, score
+from ._flkmeans import FLKMeans, KFed, score, FKM

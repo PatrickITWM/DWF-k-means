@@ -6,7 +6,7 @@ from typing import Optional, List, Dict
 from collections import deque
 
 import numpy as np
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, kmeans_plusplus, k_means
 
 
 class FLKMeans:
@@ -31,7 +31,7 @@ class FLKMeans:
                  steps_without_improvements: Optional[int] = None,
                  tol_global: float = 10 ** (-6),
                  tol_local: Optional[float] = None,
-                 save_local_models: bool = False,
+                 save_history: bool = False,
                  backend: str = "numpy",  # "sklearn"
                  verbose: int = 0):
         """
@@ -81,7 +81,7 @@ class FLKMeans:
                 if not all clients are used each round.
         :param tol_local: The tolerance, which specifies when the local training has converged (client side).
                 If not specified, use global tolerance.
-        :param save_local_models: Weather the local centroids should be stored. Default is False.
+        :param save_history: Weather the global centroids should be stored. Default is False.
         :param backend: The backend of computing the labels. 'numpy' for plain Python and numpy implementation or
                 'sklearn' for using scikit learn on the clients.
         :param verbose: An integer specifiying how much information the algorithm will display during training. The
@@ -116,15 +116,13 @@ class FLKMeans:
         self.steps_without_improvements = steps_without_improvements
         self.tol_global = tol_global
         self.tol_local = tol_local if tol_local is not None else tol_global
-        self.save_local_models = save_local_models
+        self.save_history = save_history
         self.backend = backend
         self.verbose = verbose
         #
         self.centroids: np.array = None
         self.centroids_history: List[np.array] = []
         self.n_clients = None  # Will be added in fit, information is not available yet
-        self.local_centroids_history: Dict[
-            int, List[np.array]] = None  # Will be added in fit if save_local_models is True
 
     def _get_init_centroids(self, X_locals: List[np.array]) -> np.array:
         """
@@ -393,10 +391,10 @@ class FLKMeans:
             # Set initial variables for each try
             t_start = time.time()
             centroids_history = []
-            local_centroids_history = {i: [] for i in range(self.n_clients)}
             #
             centroids = self._get_init_centroids(X_locals)
-            centroids_history.append(centroids)
+            if self.save_history:
+                centroids_history.append(centroids)
             centroids_movement = np.zeros(centroids.shape)
             movement = 0
             queue_last_movements = deque(maxlen=self.steps_without_improvements)
@@ -426,10 +424,7 @@ class FLKMeans:
                                                        t_start,
                                                        movement,
                                                        min_movement_global) for c in clients_in_round]
-                # Store the locally trained centroids
-                if self.save_local_models:
-                    for i, client in enumerate(clients_in_round):
-                        local_centroids_history[i].append(local_centroids[i])
+
                 # Aggregate to one new global centroid matrix
                 new_centroids = self._aggregate(X_locals,
                                                 local_centroids,
@@ -437,7 +432,8 @@ class FLKMeans:
                                                 centroids_movement,
                                                 clients_in_round)
                 # Store
-                centroids_history.append(new_centroids)
+                if self.save_history:
+                    centroids_history.append(new_centroids)
                 # Check how much the solution moved
                 centroids_movement = new_centroids - centroids
                 movement = np.linalg.norm(centroids_movement)
@@ -492,7 +488,6 @@ class FLKMeans:
                 optimal_score = score
                 optimal_centroids = centroids
                 self.centroids_history = centroids_history
-                self.local_centroids_history = local_centroids_history
         # After all tries, set the centroids to the best found solution.
         self.centroids = optimal_centroids
 
@@ -616,3 +611,122 @@ def score(X: np.array, centroids: np.array) -> float:
         distances = np.linalg.norm(cluster_X - centroids[clus], axis=1) ** 2
         score += np.sum(distances)
     return score / len(X)
+
+
+class FKM:
+    def __init__(self,
+                 n_clusters=5,
+                 max_iter_global: int = 300,
+                 max_iter_local: int = 5,
+                 num_client_per_round: int = 1,
+                 tol_global: float = 10 ** (-6),
+                 tol_local: Optional[float] = None,
+                 verbose: int = 0,
+                 seed: Optional[int] = None):
+        self.n_clusters = n_clusters
+        self.max_iter_global = max_iter_global
+        self.max_iter_local = max_iter_local
+        self.num_client_per_round = num_client_per_round
+        self.tol_global = tol_global
+        self.tol_local = tol_local if tol_local is not None else tol_global
+        self.verbose = verbose if verbose is not None else 0
+        self.seed = seed if seed is not None else 13
+        self.centroids = None
+
+    def _get_init_centroids(self, X_locals: List[np.array]):
+        return [kmeans_plusplus(X, n_clusters=self.n_clusters, random_state=self.seed)[0] for X in X_locals]
+
+    def _assign_label(self, X_local: np.array, centroids: np.array) -> np.array:
+        """
+        Assignes each data point in X_local to the closest centroid. Outputs a list of integers, where the integer
+        correspond to the centroids index.
+
+        :param X_local: Dataset (local).
+        :param centroids: Given centroids.
+        :return: A flat numpy array (list like) of indexes of the corresponding centroid to each data point.
+        """
+        centroids = centroids.astype("float32")
+        X_local = X_local.astype("float32")
+        dummy_k_means = KMeans(n_clusters=self.n_clusters,
+                               n_init=1,
+                               init=centroids,
+                               verbose=1)
+        dummy_k_means.cluster_centers_ = centroids
+        dummy_k_means._n_threads = 1
+        return dummy_k_means.predict(X_local)
+
+    def _weights(self, X: np.array, centroids: np.array) -> List:
+        """
+        Computes the necessary weights for each centroid for the given labels. Only necessary if aggregate_mode =
+        'weighted_avg'.X
+
+        :param X: Local dataset.
+        :param centroids: Current centroids.
+        :return: A flat numpy array, containing the number of data points assigned to centroid i for
+        i=1,...,(number of centroids/clusters)
+        """
+        labels = self._assign_label(X, centroids)
+        counter = Counter(labels)
+        return [counter.get(i, 0) for i in range(centroids.shape[0])]
+
+    def fit(self, X_locals: List[np.array]):
+        self.n_clients = len(X_locals)
+        initialized = False
+        # Start training
+        for round in range(self.max_iter_global):
+            if self.verbose >= 1:
+                print(f'Global round {round}')
+            # Select random clients
+            clients_in_round = random.sample(range(self.n_clients), k=self.num_client_per_round)
+            selected_X = [X_locals[c] for c in clients_in_round]
+            # Create local centroids
+            if not initialized:
+                centroids_local = {c: centroid for c, centroid in
+                                   zip(clients_in_round, self._get_init_centroids(selected_X))}
+                weights = [self._weights(X, centroids) for centroids, X in zip(centroids_local.values(), selected_X)]
+                initialized = True
+            else:
+                centroids_local = {}
+                for c in range(self.num_client_per_round):
+                    local_centroids = global_centroids.copy()
+                    X_client = selected_X[c]
+                    weights = self._weights(X_client, local_centroids)
+                    filter_from_weights = [True if w > 0 else False for w in weights]
+                    selected_local_centroids = local_centroids[filter_from_weights, :]
+                    k = selected_local_centroids.shape[0]
+                    try:
+                        new_local_centroids = k_means(X_client,
+                                                      n_clusters=k,
+                                                      random_state=self.seed,
+                                                      max_iter=self.max_iter_local,
+                                                      tol=self.tol_local,
+                                                      init=selected_local_centroids)[0]
+                        centroids_local[c] = new_local_centroids
+                    except ValueError as e:
+                        if self.verbose >= 1:
+                            print(e)
+                weights = [self._weights(selected_X[c], centroids) for c, centroids in centroids_local.items()]
+            # Collect local centroids and weights
+            concatenated_centroids = np.concatenate(list(centroids_local.values()))
+            concatenated_weights = np.concatenate(weights)
+            # Do global k-means
+            try:
+                global_centroids = k_means(concatenated_centroids,
+                                           n_clusters=self.n_clusters,
+                                           random_state=self.seed,
+                                           sample_weight=concatenated_weights,
+                                           max_iter=self.max_iter_global,
+                                           tol=self.tol_global)[0]
+            except ValueError as e:
+                if self.verbose >= 1:
+                    print(e)
+                    continue
+            self.centroids = global_centroids
+
+    def predict(self, X: np.array) -> np.array:
+        """
+        Predict labels for a given dataset X based on the trained centroids.
+        :param X: A dataset.
+        :return: A flat numpy array of label indices.
+        """
+        return self._assign_label(X, self.centroids)
