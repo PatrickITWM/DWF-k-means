@@ -595,15 +595,16 @@ def score(X: np.array, centroids: np.array) -> float:
         :param centroids: Current centroids.
         :return: The sum of all squared distances from each data point to its assigned centroid.
         """
+    centroids = centroids.astype("float32")
     n_clusters = centroids.shape[0]
-    # Assign labels
-    # Compute all distances from each data point to each centroid.
-    distances = np.array(
-        [np.linalg.norm(X - centroids[k], axis=1) for k in range(n_clusters)]
-    ).transpose()
-    # distances = np.linalg.norm(X_local - centroids[:, None, :], axis=2).transpose() # slower!
-    # The label for each data point is the one with the smallest distance
-    labels = np.argmin(distances, axis=1)
+    X = X.astype("float32")
+    dummy_k_means = KMeans(n_clusters=n_clusters,
+                           n_init=1,
+                           init=centroids,
+                           verbose=1)
+    dummy_k_means.cluster_centers_ = centroids
+    dummy_k_means._n_threads = 1
+    labels = dummy_k_means.predict(X)
     # compute score
     score = 0
     for clus in range(n_clusters):

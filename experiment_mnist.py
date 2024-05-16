@@ -31,7 +31,7 @@ memory = Memory("savepoints", verbose=0)
 # -------------------------------------
 RESULT_PATH = Path("experiments")
 # -------------------------------------
-N_KERNELS = 15
+N_KERNELS = -1
 # -------------------------------------
 EXPERIMENT = "MNIST"
 K = 20
@@ -68,7 +68,7 @@ def create_folder_path_if_necessary(folder_path):
 # Create data
 
 mnist = fetch_openml("mnist_784", as_frame=False)
-X = mnist.data[:60_000]
+X = mnist.data[:60_000] / 255
 y = mnist.target[:60_000]
 
 
@@ -467,6 +467,7 @@ def compute_completeness(experiment_name: str,
                          tol_local: float,
                          init_method: str,
                          max_iter: int = 10_000,
+                         max_iter_fkm: int = 1000,
                          steps_without_improvements: Optional[int] = None):
     model = model_dict[(model_type, data_distribution, model_number, n_clients_per_round)]
     return completeness_score(y, model.predict(X))
