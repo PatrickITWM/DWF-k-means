@@ -3,12 +3,14 @@
 
 import os
 import shutil
+import time
 import warnings
 from collections import defaultdict
+from datetime import timedelta
 from itertools import product
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Optional
+from typing import Optional, Tuple
 
 import pandas as pd
 from joblib import Parallel, delayed, Memory
@@ -32,7 +34,7 @@ memory = Memory("savepoints", verbose=0)
 # -------------------------------------
 RESULT_PATH = Path("experiments")
 # -------------------------------------
-N_KERNELS = -1
+N_KERNELS = 1
 # -------------------------------------
 EXPERIMENT = "FEMNIST"
 K = 64
@@ -325,7 +327,8 @@ def get_trained_model(experiment_name: str,
                       max_iter: int = 10_000,
                       max_iter_fkm: int = 1_000,
                       steps_without_improvements: Optional[int] = None):
-    print(f"{model_type=}, {model_number=}, {data_distribution=}, {n_clients_per_round=}, {experiment_name= }")
+    start = time.time()
+    print(f"Start {model_type=}, {model_number=}, {data_distribution=}, {n_clients_per_round=}, {experiment_name=}")
     if model_type == MODELTYPE.KMEANS:
         model = get_trained_k_means(experiment_name,
                                     model_number,
@@ -398,6 +401,10 @@ def get_trained_model(experiment_name: str,
                                 steps_without_improvements)
     else:
         raise ValueError(f"Unknown model type {model_type}")
+    stop = time.time()
+    elapsed = timedelta(seconds=stop - start)
+    print(
+        f"Done {model_type=}, {model_number=}, {data_distribution=}, {n_clients_per_round=}, {experiment_name= }, time = {elapsed}")
     return model
 
 

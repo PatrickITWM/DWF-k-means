@@ -539,10 +539,7 @@ class KFed:
         self.tol_local = tol_local if tol_local is not None else tol_global
         self.verbose = verbose
         #
-        self.centroids_clients: List[np.array] = []
-        self.merged_centroids: np.array = None  # Will be added in fit
         self.n_clients = None  # Will be added in fit, information is not available yet
-        self.local_centroids_history: Dict[int, List[np.array]] = None  # Will be added in fit
         self.global_k_means = KMeans(n_clusters=n_clusters, n_init=n_init, max_iter=max_iter_global, tol=tol_global)
 
     def fit(self, X_locals: List[np.array]):
@@ -556,6 +553,7 @@ class KFed:
         self.n_clients = len(X_locals)
         t_start_absolute = time.time()
         selected_clients = random.sample(range(self.n_clients), self.num_client_per_round)
+        centroids_clients = []
         for i, X_client in enumerate(X_locals):
             if i not in selected_clients:
                 continue
@@ -568,11 +566,11 @@ class KFed:
                                  tol=self.tol_local)
                 k_means.fit(X_client)
                 centroids = k_means.cluster_centers_
-                self.centroids_clients.append(centroids)
+                centroids_clients.append(centroids)
             except Exception as e:
                 print(e)
-        merged_centroids = np.concatenate(self.centroids_clients)
-        self.merged_centroids = merged_centroids
+        merged_centroids = np.concatenate(centroids_clients)
+        merged_centroids = merged_centroids
         self.global_k_means.fit(merged_centroids)
         t_end_absolute = time.time()
         if self.verbose >= 1:
@@ -635,7 +633,7 @@ class FKM:
         self.centroids = None
 
     def _get_init_centroids(self, X_locals: List[np.array]):
-        return [kmeans_plusplus(X, n_clusters=self.n_clusters, random_state=self.seed)[0] for X in X_locals]
+        return [kmeans_plusplus(np.array(X), n_clusters=self.n_clusters, random_state=self.seed)[0] for X in X_locals]
 
     def _assign_label(self, X_local: np.array, centroids: np.array) -> np.array:
         """
