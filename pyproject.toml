@@ -1,0 +1,20 @@
+[project]
+name = "dwf-k-means"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "fastparquet>=2024.11.0",
+    "ipywidgets>=8.1.7",
+    "jax>=0.6.1",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.3",
+    "notebook>=7.4.3",
+    "numpy>=2.3.0",
+    "pandas>=2.3.0",
+    "pandas-stubs==2.2.3.250527",
+    "pillow>=11.2.1",
+    "scikit-learn>=1.7.0",
+    "seaborn>=0.13.2",
+    "tqdm>=4.67.1",
+]

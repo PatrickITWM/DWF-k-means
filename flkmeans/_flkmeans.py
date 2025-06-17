@@ -7,6 +7,7 @@ from collections import deque
 
 import numpy as np
 from sklearn.cluster import KMeans, kmeans_plusplus, k_means
+from tqdm.auto import tqdm, trange
 
 
 class FLKMeans:
@@ -73,18 +74,18 @@ class FLKMeans:
                 a sufficiently small value for the learning rate. However, this reduces convergence speed.
         :param momentum: To reduce the effect of the learning rate, one can specify a momentum.
         :param steps_without_improvements: Alternative way to stop global training early (that means, we consider the
-                training as converged). If not None, this is used as additional stopping criterion together with the
+                training as converged). If not None, this is used as an additional stopping criterion together with the
                 tolerance.
         :param tol_global: The tolerance, which specifies when the algorithm has converged (globally). If the
                 movement (=||*||_2 norm of the matrix of old centroids minus the matrix of new centroids) is under the
-                given tollerance, the algorithm stops. If too low, it will not converge because of too much noise,
+                given tolerance, the algorithm stops. If too low, it will not converge because of too much noise,
                 if not all clients are used each round.
         :param tol_local: The tolerance, which specifies when the local training has converged (client side).
                 If not specified, use global tolerance.
         :param save_history: Weather the global centroids should be stored. Default is False.
         :param backend: The backend of computing the labels. 'numpy' for plain Python and numpy implementation or
                 'sklearn' for using scikit learn on the clients.
-        :param verbose: An integer specifiying how much information the algorithm will display during training. The
+        :param verbose: An integer specifying how much information the algorithm will display during training. The
                 higher, the more information is displayed.
 
         """
@@ -190,15 +191,6 @@ class FLKMeans:
         :param min_movement: The overall minimal global movement.
         :return: Updated centroids.
         """
-        # Print current status to console
-        if self.verbose == 2:
-            print(
-                f"...Global round {i_global + 1}, "
-                f"last global movement: {movement:.6f}, "
-                f"min global movement: {min_movement:.6f}, "
-                f"time: {time.time() - t_start:.2f}s, "
-                f"client {i_client + 1}" + 40 * " ",
-                flush=True, end="")
         # Do local_round many local training rounds or until converged.
         for local_round in range(self.iter_local):
             # One step of KMeans on the local data
@@ -209,9 +201,6 @@ class FLKMeans:
             # Check if converged
             if movement < self.tol_local:
                 break
-        # Update console
-        if self.verbose == 2:
-            print("\r", end="")
         # return local trained centroids
         return centroids
 
@@ -387,7 +376,8 @@ class FLKMeans:
         min_movement_global = math.inf
         t_start_absolute = time.time()
         # Run the FLKMeans n_init_round times and keep the best centroids of these runs.
-        for n_init_round in range(self.n_init):
+        iterator_init = trange(self.n_init, position=0, desc="Init run") if self.verbose >= 1 else range(self.n_init)
+        for n_init_round in iterator_init:
             # Set initial variables for each try
             t_start = time.time()
             centroids_history = []
@@ -400,22 +390,14 @@ class FLKMeans:
             queue_last_movements = deque(maxlen=self.steps_without_improvements)
             queue_last_movements.append(math.inf)
             # Now do the (FL) KMeans steps
-            for i_global in range(self.max_iter_global):
+            iterator_epoch = trange(self.max_iter_global, position=1, leave=False,
+                                    desc="Epoch") if self.verbose >= 2 else range(self.max_iter_global)
+            for i_global in iterator_epoch:
                 # Choose random clients participating this round, if number is specified, else use all
                 if self.num_client_per_round is not None:
                     clients_in_round = random.sample(range(self.n_clients), k=self.num_client_per_round)
                 else:
                     clients_in_round = range(self.n_clients)
-                # Print status to console
-                if self.verbose == 1:
-                    m = min(queue_last_movements)
-                    print(
-                        f"...Global round {i_global + 1}, "
-                        f"time: {time.time() - t_start:.2f}s, "
-                        f"movement: {movement:.6f}, "
-                        f"steps since last improvement: {[i for i, e in enumerate(queue_last_movements) if e <= m][0]}, "
-                        f"min movement: {min_movement_global:.6f}" + 50 * " ",
-                        flush=True, end="")
                 # Compute new centroids on each client
                 local_centroids = [self._client_update(X_locals[c],
                                                        centroids,
@@ -442,9 +424,6 @@ class FLKMeans:
                     queue_last_movements.appendleft(movement)
                 # Update
                 centroids = new_centroids
-                # Update console
-                if self.verbose == 1:
-                    print("\r", end="")
                 # Stop if converged (movement under threshold)
                 min_steps_done = i_global >= self.min_iter_global
                 movement_under_threshold = movement < self.tol_global
@@ -452,42 +431,21 @@ class FLKMeans:
                                         len(queue_last_movements) == self.steps_without_improvements and \
                                         min(queue_last_movements) == queue_last_movements[-1]
                 if min_steps_done and (movement_under_threshold or movement_not_improved):
-                    t_end = time.time()
-                    t_diff_round = t_end - t_start
-                    t_diff_absolute = t_end - t_start_absolute
-                    estimated = self.n_init / (n_init_round + 1) * t_diff_absolute
-                    # Print status to console
-                    if self.verbose > 0:
-                        print(
-                            f"Attempt {n_init_round + 1} converged after {i_global + 1} rounds. "
-                            f"Round: {t_diff_round:.2f}s, "
-                            f"total: {t_diff_absolute:.2f}s, "
-                            f"estimated: {estimated:.2f}s" + 30 * " ")
                     # break out of the global iterations loop, but not out of the number of tries loop.
+                    if self.verbose >= 2:
+                        iterator_epoch.close()
                     break
-
-            else:
-                # We land here if the algorithm did not converge in the specified number of iterations.
-                t_end = time.time()
-                t_diff_round = t_end - t_start
-                t_diff_absolute = t_end - t_start_absolute
-                estimated = self.n_init / (n_init_round + 1) * t_diff_absolute
-                # Print status to console
-                if self.verbose > 0:
-                    print(
-                        f"Attempt {n_init_round + 1} not converged. "
-                        f"Round: {t_diff_round:.2f}s, "
-                        f"total: {t_diff_absolute:.2f}s, "
-                        f"estimated: {estimated:.2f}s" + 40 * " ")
+                if self.verbose >= 2:
+                    iterator_epoch.set_postfix({"Movement": f"{movement:.6f}"})
             # After training check if the computed solution is better than the previous solution.
             score = sum([self._score(X_local, centroids) for X_local in X_locals]) / n_samples
             if optimal_score is None or score < optimal_score:
                 # Update the current optimal solution if improved
-                if self.verbose > 0:
-                    print(f"---New optimal score {score}")
                 optimal_score = score
                 optimal_centroids = centroids
                 self.centroids_history = centroids_history
+            if self.verbose >= 1:
+                iterator_init.set_postfix({"Best score": f"{optimal_score:.6f}"})
         # After all tries, set the centroids to the best found solution.
         self.centroids = optimal_centroids
 

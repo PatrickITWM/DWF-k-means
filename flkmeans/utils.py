@@ -1,64 +1,124 @@
 import math
-from itertools import accumulate
+import random
+from collections import defaultdict
 from typing import Optional, List, Dict
 
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
-from sklearn.cluster import KMeans
-from sklearn.model_selection import train_test_split
+from sklearn.utils import shuffle
+from tqdm.auto import trange
+
 
 # plt.style.use('seaborn-dark')
 
 
-def distribute_to_clients(X: np.array,
-                          n_clients: int = 3,
-                          mode: str = "random",
-                          distribution: Optional[List[float]] = None,
-                          seed: Optional[int] = 1024) -> List[np.array]:
+def distribute_to_clients(X: np.ndarray,
+                          y: np.ndarray,
+                          clients_data_sizes: list[int],
+                          p: float,
+                          with_replacement=False,
+                          cluster_exclusive_per_client=False,
+                          seed: int = 1024,
+                          verbose:bool=False):
     """
-    Receives a dataset X and splits it into small subsets. Returns a list of smaller datasets, each entry in the list
-    correspond to the data of a client.
+    Distributes a dataset X into subsets for multiple clients based on
+    Chung, Jichan, Kangwook Lee, and Kannan Ramchandran. "Federated unsupervised clustering with generative models." AAAI 2022 international workshop on trustable, verifiable and auditable federated learning. Vol. 4. 2022.
 
-    :param X: A numpy array, the overall datset.
-    :param n_clients: The number of clients.
-    :param mode: The mode, how to distribute the data to the clients. Currently implemented modes:
-            **random** (shuffles X and then slices the data into subsets of correct sizes according to the distribution),
-            **clustered** (Runs one iteration round of k-means on X, where k = number of clients. Each client then gets
-            the datapoints assigend to 'their' labels number).
-            **half** Distributes half the data like in "random" and the other half like "clustered".
-    :param distribution: (Optional) Only important if mode = random. A list of how much data each client should get.
-            Sum of the list must be equal 1 and each entry must be positive.
-    :param distribution: (Optional) seed for distribition.
-    :return: A list of local datasets as numpy array.
+    The p value controls the data heterogeneity.
+
+    Parameters:
+    X : np.ndarray
+        The data matrix containing the features with rows representing samples and columns representing
+        features.
+
+    y : np.ndarray
+        The labels array, where each entry corresponds to the label of the corresponding sample in the
+        dataset. Necessary for distribution across clients based on the p value.
+
+    clients_data_sizes : list[int]
+        A list specifying the number of data points to assign to each client.
+
+    p : float
+        Proportion of data points to be allocated from clusters designated for specific clients.
+        p=0 corresponds to uniform distribution across clients. p=1 assigns each client data from a single cluster.
+        More specifically, the number of data points from a randomly chosen cluster assigned to each client is given by
+         floor(p * n_samples), The rest is filled with randomly chosen data points from all clusters.
+
+    with_replacement : bool, default False
+        Whether to allow replacement when selecting data items from the clusters or remaining samples.
+
+    cluster_exclusive_per_client : bool, default False
+        Whether each client should exclusively receive data from a unique cluster. If False, two clients may be assigned
+        the same cluster.
+
+    seed : int, default 1024
+        The random seed used for reproducible data distribution.
+
+    Returns:
+    list[np.ndarray]
+        A list of data subsets, where each entry corresponds to the data assigned to a specific client.
+
+    Raises:
+    ValueError
+        If the total data points are insufficient for distribution when `with_replacement` is False or if
+        the number of clusters is inadequate for distribution across clients when
+        `cluster_exclusive_per_client` is True. Note that we only do basic checks on the data, the input can still lead
+        to error due to incompatible input (to less data per cluster to distribute etc.).
     """
-    DISTRIBUTION_MODES = ["random", "clustered"]
+    # Set the seed for reproducibility
+    random.seed(seed)
+    np.random.seed(seed)
+    # Copy for safety
+    X = X.copy()
+    y = y.copy()
+    # Calculate basic objects we need to distribute the data
+    n_clients = len(clients_data_sizes)
+    cluster_indexes = list(set(y.tolist()))
+    n_clusters = len(cluster_indexes)
+    sizes_selected_cluster = [math.floor(p * s) for s in clients_data_sizes]
+    sizes_rest = [math.ceil((1 - p) * s) for s in clients_data_sizes]
+    X_splitted_into_clusters = {cluster_idx: X[y == cluster_idx].copy() for cluster_idx in cluster_indexes}
 
-    if distribution is None:
-        distribution = [1 / n_clients] * n_clients
-    if mode == "random":
-        # sizes of each chunk
-        sizes = [math.floor(distribution[i] * len(X)) + (1 if i < len(X) % n_clients else 0) for i in range(n_clients)]
-        # Build cumulated values for better processing
-        acc = [0] + list(accumulate(sizes))
-        # Shuffle
-        X_copy = X.copy()
-        np.random.seed(seed)
-        np.random.shuffle(X_copy)
-        # Create slices
-        return [X_copy[acc[i]:acc[i + 1]] for i in range(n_clients)]
-    if mode == "clustered":
-        k_means = KMeans(n_clusters=n_clients, max_iter=5, n_init=5, random_state=seed)
-        k_means.fit(X)
-        labels = k_means.predict(X).tolist()
-        return [np.array([x for x, c in zip(X, labels) if c == clus]) for clus in set(labels)]
-    if mode == "half":
-        X1, X2 = train_test_split(X, test_size=0.5, random_state=42)
-        data_iid = distribute_to_clients(X1, mode="random", n_clients=n_clients, seed=seed)
-        data_non_iid = distribute_to_clients(X2, mode="clustered", n_clients=n_clients, seed=seed)
-        return [np.append(a, b, axis=0) for a, b in zip(data_iid, data_non_iid)]
+    #
+    clients_data = []
+
+    # Check if distribution is possible with given inputs
+    if not with_replacement and len(X) < sum(clients_data_sizes):
+        raise ValueError("Not enough data points to distribute to clients.")
+    if cluster_exclusive_per_client and n_clusters < n_clients:
+        raise ValueError("Not enough clusters to distribute to clients.")
+
+    # Choose a cluster for each client
+    if cluster_exclusive_per_client:
+        selected_cluster_per_client = random.sample(cluster_indexes, k=n_clients)
     else:
-        raise NotImplementedError(f"Distribution mode {mode} not implemented")
+        selected_cluster_per_client = random.choices(cluster_indexes, k=n_clients)
+    # Distribute data from the selected cluster to the client
+    for client in (trange(n_clients) if verbose else range(n_clients)):
+        selected_cluster = selected_cluster_per_client[client]
+        size = sizes_selected_cluster[client]
+        X_selected_cluster = X_splitted_into_clusters[selected_cluster]
+        if X_selected_cluster.shape[0] < size:
+            raise ValueError(f"Not enough data points in cluster {selected_cluster} to distribute to client {client}. Available data points: {X_selected_cluster.shape[0]}, size: {size}")
+        index = np.random.choice(X_selected_cluster.shape[0], size=size, replace=with_replacement)
+        clients_data.append(X_selected_cluster[index].copy())
+        if not with_replacement:
+            X_splitted_into_clusters[selected_cluster] = np.delete(X_selected_cluster, index, axis=0)
+    # Collect the remaining data in a single array again
+    X_remainder = np.concatenate(list(X_splitted_into_clusters.values()), axis=0)
+    # Distribute the remaining data to the clients
+    for client in (trange(n_clients) if verbose else range(n_clients)):
+        size = sizes_rest[client]
+        index = np.random.choice(X_remainder.shape[0], size=size, replace=with_replacement)
+        X_remainder_client = X_remainder[index].copy()
+        clients_data[client] = np.concatenate([clients_data[client], X_remainder_client], axis=0)
+        if not with_replacement:
+            np.delete(X_remainder, index, axis=0)
+    # shuffle the client data
+    for client in range(n_clients):
+        clients_data[client] = shuffle(clients_data[client], random_state=seed + client)
+    return clients_data
 
 
 def create_plot(ax: Axes,
@@ -114,3 +174,25 @@ def create_plot(ax: Axes,
         centroids_y = [c[1] for c in centroids]
         ax.scatter(centroids_x, centroids_y, alpha=1.0, s=size_centroids, color="black")  # Plot the centroids
     ax.set_title(name)
+
+def map_pred_to_true(y_true, y_pred):
+    """
+    Returns a map to match the labels to the best true label.
+    This is necessary, since the labels of the clustering (eg. 0-9)
+    doesn't have to match the true labels (eg. A-J) or the label of the clustering doesn't match
+    the true label (the clustering label 3 on MNIST data could correspond to the number 5 eg.).
+    """
+    if len(y_true) != len(y_pred):
+        raise ValueError(f"len y_true: {len(y_true)}, len y_pred: {len(y_pred)}")
+    labels = set(y_pred)
+    dict_counts = {l: defaultdict(int) for l in labels}
+    for i, (label_true, label_pred) in enumerate(zip(y_true, y_pred)):
+        dict_counts[label_pred][label_true] += 1
+    dict_map = {}
+    for label_pred in labels:
+        dict_count_dict = dict_counts[label_pred]
+        max_occurrence = max(dict_count_dict.values()) if len(dict_count_dict) > 0 else -1
+        max_args = [key for key, value in dict_count_dict.items() if value == max_occurrence]
+        label_assigend = max_args[0]
+        dict_map[label_pred] = label_assigend
+    return [dict_map[v] for v in y_pred]
