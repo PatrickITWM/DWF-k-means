@@ -69,7 +69,7 @@ def create_folder_path_if_necessary(folder_path):
 
 X = pd.read_parquet(Path("data femnist") / "X.parquet").to_numpy()
 y = pd.read_parquet(Path("data femnist") / "y.parquet").to_numpy().reshape(-1)
-X, y = resample(X, y, random_state=1024, replace=False, stratify=y, n_samples=20000)  # Limit the size
+# X, y = resample(X, y, random_state=1024, replace=False, stratify=y, n_samples=20000)  # Limit the size
 
 
 # %%
