@@ -50,6 +50,8 @@ REPETITIONS = 100
 MAX_ITER = 10_000
 MAX_ITER_FKM = 1_000
 
+clients_data_sizes = [200 - 100 + 2 * i for i in range(100)]
+
 
 # %%
 # Definitions
@@ -126,8 +128,7 @@ def get_trained_ewf_k_means(experiment_name: str,
                             max_iter: int = 10_000,
                             steps_without_improvements: Optional[int] = None):
     data = distribute_to_clients(X, y,
-                                 clients_data_sizes=[len(X) // n_clients - n_clients // 2 + i for i in
-                                                     range(n_clients)],
+                                 clients_data_sizes=clients_data_sizes,
                                  p=p,
                                  with_replacement=False,
                                  clusters_to_clients_evenly_distributed=True,
@@ -167,8 +168,7 @@ def get_trained_dwf_k_means(experiment_name: str,
                             max_iter: int = 10_000,
                             steps_without_improvements: Optional[int] = None):
     data = distribute_to_clients(X, y,
-                                 clients_data_sizes=[len(X) // n_clients - n_clients // 2 + i for i in
-                                                     range(n_clients)],
+                                 clients_data_sizes=clients_data_sizes,
                                  p=p,
                                  with_replacement=False,
                                  clusters_to_clients_evenly_distributed=True,
@@ -208,8 +208,7 @@ def get_trained_k_fed(experiment_name: str,
                       max_iter: int = 10_000,
                       steps_without_improvements: Optional[int] = None):
     data = distribute_to_clients(X, y,
-                                 clients_data_sizes=[len(X) // n_clients - n_clients // 2 + i for i in
-                                                     range(n_clients)],
+                                 clients_data_sizes=clients_data_sizes,
                                  p=p,
                                  with_replacement=False,
                                  clusters_to_clients_evenly_distributed=True,
@@ -239,8 +238,7 @@ def get_trained_fkm(experiment_name: str,
                     max_iter: int = 10_000,
                     steps_without_improvements: Optional[int] = None):
     data = distribute_to_clients(X, y,
-                                 clients_data_sizes=[len(X) // n_clients - n_clients // 2 + i for i in
-                                                     range(n_clients)],
+                                 clients_data_sizes=clients_data_sizes,
                                  p=p,
                                  with_replacement=False,
                                  clusters_to_clients_evenly_distributed=True,

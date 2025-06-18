@@ -78,10 +78,12 @@ def create_folder_path_if_necessary(folder_path):
 # %%
 # Create data
 
-N_SAMPLES = 10_000
+N_SAMPLES = 20_000
 CENTERS = 5
 CLUSTER_STD = 0.2
-N_OUTLIERS = 100
+N_OUTLIERS = 200
+
+clients_data_sizes = [100 - 50 + i for i in range(100)]
 
 # Synth data
 X, y = make_blobs(n_samples=N_SAMPLES,
@@ -145,8 +147,7 @@ def get_trained_ewf_k_means(experiment_name: str,
                             max_iter: int = 10_000,
                             steps_without_improvements: Optional[int] = None):
     data = distribute_to_clients(X, y,
-                                 clients_data_sizes=[len(X) // n_clients - n_clients // 2 + i for i in
-                                                     range(n_clients)],
+                                 clients_data_sizes=clients_data_sizes,
                                  p=p,
                                  with_replacement=False,
                                  clusters_to_clients_evenly_distributed=True,
@@ -186,8 +187,7 @@ def get_trained_dwf_k_means(experiment_name: str,
                             max_iter: int = 10_000,
                             steps_without_improvements: Optional[int] = None):
     data = distribute_to_clients(X, y,
-                                 clients_data_sizes=[len(X) // n_clients - n_clients // 2 + i for i in
-                                                     range(n_clients)],
+                                 clients_data_sizes=clients_data_sizes,
                                  p=p,
                                  with_replacement=False,
                                  clusters_to_clients_evenly_distributed=True,
@@ -227,8 +227,7 @@ def get_trained_k_fed(experiment_name: str,
                       max_iter: int = 10_000,
                       steps_without_improvements: Optional[int] = None):
     data = distribute_to_clients(X, y,
-                                 clients_data_sizes=[len(X) // n_clients - n_clients // 2 + i for i in
-                                                     range(n_clients)],
+                                 clients_data_sizes=clients_data_sizes,
                                  p=p,
                                  with_replacement=False,
                                  clusters_to_clients_evenly_distributed=True,
@@ -258,8 +257,7 @@ def get_trained_fkm(experiment_name: str,
                     max_iter: int = 10_000,
                     steps_without_improvements: Optional[int] = None):
     data = distribute_to_clients(X, y,
-                                 clients_data_sizes=[len(X) // n_clients - n_clients // 2 + i for i in
-                                                     range(n_clients)],
+                                 clients_data_sizes=clients_data_sizes,
                                  p=p,
                                  with_replacement=False,
                                  clusters_to_clients_evenly_distributed=True,
