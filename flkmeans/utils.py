@@ -51,7 +51,7 @@ def distribute_to_clients(X: np.ndarray,
     clusters_to_clients_evenly_distributed : bool, default False
         Whether the clusters are distributed evenly across clients or totally random.
         If False, the clusters are totally randomly selected, if true, each cluster is used
-        n_clusters//n_clients or n_clusters//n_clients + 1 times.
+        n_clients // n_clusters or nn_clients // n_clusters + 1 times.
 
     seed : int, default 1024
         The random seed used for reproducible data distribution.
@@ -90,7 +90,7 @@ def distribute_to_clients(X: np.ndarray,
 
     # Choose a cluster for each client
     if clusters_to_clients_evenly_distributed:
-        max_usage_of_cluster = n_clusters // n_clients + 1
+        max_usage_of_cluster = n_clients // n_clusters  + 1
         selected_cluster_per_client = random.sample(max_usage_of_cluster * cluster_indexes, k=n_clients)
     else:
         selected_cluster_per_client = random.choices(cluster_indexes, k=n_clients)
