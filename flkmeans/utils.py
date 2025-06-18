@@ -18,9 +18,9 @@ def distribute_to_clients(X: np.ndarray,
                           clients_data_sizes: list[int],
                           p: float,
                           with_replacement=False,
-                          cluster_exclusive_per_client=False,
+                          clusters_to_clients_evenly_distributed=False,
                           seed: int = 1024,
-                          verbose:bool=False):
+                          verbose: bool = False):
     """
     Distributes a dataset X into subsets for multiple clients based on
     Chung, Jichan, Kangwook Lee, and Kannan Ramchandran. "Federated unsupervised clustering with generative models." AAAI 2022 international workshop on trustable, verifiable and auditable federated learning. Vol. 4. 2022.
@@ -48,9 +48,10 @@ def distribute_to_clients(X: np.ndarray,
     with_replacement : bool, default False
         Whether to allow replacement when selecting data items from the clusters or remaining samples.
 
-    cluster_exclusive_per_client : bool, default False
-        Whether each client should exclusively receive data from a unique cluster. If False, two clients may be assigned
-        the same cluster.
+    clusters_to_clients_evenly_distributed : bool, default False
+        Whether the clusters are distributed evenly across clients or totally random.
+        If False, the clusters are totally randomly selected, if true, each cluster is used
+        n_clusters//n_clients or n_clusters//n_clients + 1 times.
 
     seed : int, default 1024
         The random seed used for reproducible data distribution.
@@ -86,12 +87,11 @@ def distribute_to_clients(X: np.ndarray,
     # Check if distribution is possible with given inputs
     if not with_replacement and len(X) < sum(clients_data_sizes):
         raise ValueError("Not enough data points to distribute to clients.")
-    if cluster_exclusive_per_client and n_clusters < n_clients:
-        raise ValueError("Not enough clusters to distribute to clients.")
 
     # Choose a cluster for each client
-    if cluster_exclusive_per_client:
-        selected_cluster_per_client = random.sample(cluster_indexes, k=n_clients)
+    if clusters_to_clients_evenly_distributed:
+        max_usage_of_cluster = n_clusters // n_clients + 1
+        selected_cluster_per_client = random.sample(max_usage_of_cluster * cluster_indexes, k=n_clients)
     else:
         selected_cluster_per_client = random.choices(cluster_indexes, k=n_clients)
     # Distribute data from the selected cluster to the client
@@ -100,7 +100,8 @@ def distribute_to_clients(X: np.ndarray,
         size = sizes_selected_cluster[client]
         X_selected_cluster = X_splitted_into_clusters[selected_cluster]
         if X_selected_cluster.shape[0] < size:
-            raise ValueError(f"Not enough data points in cluster {selected_cluster} to distribute to client {client}. Available data points: {X_selected_cluster.shape[0]}, size: {size}")
+            raise ValueError(
+                f"Not enough data points in cluster {selected_cluster} to distribute to client {client}. Available data points: {X_selected_cluster.shape[0]}, size: {size}")
         index = np.random.choice(X_selected_cluster.shape[0], size=size, replace=with_replacement)
         clients_data.append(X_selected_cluster[index].copy())
         if not with_replacement:
@@ -174,6 +175,7 @@ def create_plot(ax: Axes,
         centroids_y = [c[1] for c in centroids]
         ax.scatter(centroids_x, centroids_y, alpha=1.0, s=size_centroids, color="black")  # Plot the centroids
     ax.set_title(name)
+
 
 def map_pred_to_true(y_true, y_pred):
     """
