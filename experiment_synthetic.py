@@ -81,7 +81,6 @@ def create_folder_path_if_necessary(folder_path):
 N_SAMPLES = 20_000
 CENTERS = 5
 CLUSTER_STD = 0.2
-N_OUTLIERS = 200
 
 clients_data_sizes = [100 - 50 + i for i in range(100)]
 
@@ -92,8 +91,8 @@ X, y = make_blobs(n_samples=N_SAMPLES,
                   center_box=(-1, 1),
                   random_state=18042023)
 # Add outliers
-X = np.append(X, random_points(N_OUTLIERS), axis=0)
-y = np.append(y, N_OUTLIERS * [CENTERS], axis=0)
+X = np.array(X)
+y = np.array(y)
 
 
 # %%
