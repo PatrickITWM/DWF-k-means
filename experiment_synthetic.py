@@ -4,6 +4,7 @@
 import os
 import random
 import warnings
+from functools import wraps
 from itertools import product
 from pathlib import Path
 from typing import Optional
@@ -15,7 +16,7 @@ from sklearn.cluster import KMeans
 from sklearn.datasets import make_blobs
 from sklearn.metrics import accuracy_score, v_measure_score, completeness_score, homogeneity_score, \
     normalized_mutual_info_score, cohen_kappa_score
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from flkmeans import FLKMeans, KFed, score, FKM
 from flkmeans.utils import distribute_to_clients, map_pred_to_true
@@ -34,6 +35,7 @@ memory = Memory("savepoints", verbose=0)
 RESULT_PATH = Path("experiments")
 # -------------------------------------
 N_KERNELS = -1
+SHUFFLE_TRAINING_ORDER = True  # Only relevant for the order in which all models are trained. If true, better time estimate.
 # -------------------------------------
 EXPERIMENT = "SYNTHETIC"
 K = 5
@@ -289,7 +291,7 @@ def get_trained_model(experiment_name: str,
                       max_iter: int = 10_000,
                       max_iter_fkm: int = 1000,
                       steps_without_improvements: Optional[int] = None):
-    print(f"{model_type=}, {model_number=}, {p=}, {n_clients_per_round=}, {experiment_name= }")
+    # print(f"{model_type=}, {model_number=}, {p=}, {n_clients_per_round=}, {experiment_name= }")
     if model_type == MODELTYPE.KMEANS:
         model = get_trained_k_means(experiment_name,
                                     model_number,
@@ -363,7 +365,11 @@ def get_trained_model(experiment_name: str,
 
     else:
         raise ValueError(f"Unknown model type {model_type}")
-    return model
+    config = {"model_type": model_type,
+              "p": p,
+              "model_number": model_number,
+              "n_clients_per_round": n_clients_per_round}
+    return model, config
 
 
 @memory.cache
@@ -510,42 +516,44 @@ def compute_homogeneity(experiment_name: str,
     return homogeneity_score(y, model.predict(X))
 
 
-args = {"experiment_name": EXPERIMENT,
-        "k": K,
-        "n_clients": N_CLIENTS,
-        "lr": LEARNING_RATE,
-        "momentum": MOMENTUM,
-        "tol_global": TOL_GLOBAL,
-        "tol_local": TOL_LOCAL,
-        "init_method": "kfed",
-        "max_iter": MAX_ITER,
-        "max_iter_fkm": MAX_ITER_FKM,
-        "steps_without_improvements": STEPS_WITHOUT_IMPROVEMENTS}
+kwargs = {"experiment_name": EXPERIMENT,
+          "k": K,
+          "n_clients": N_CLIENTS,
+          "lr": LEARNING_RATE,
+          "momentum": MOMENTUM,
+          "tol_global": TOL_GLOBAL,
+          "tol_local": TOL_LOCAL,
+          "init_method": "kfed",
+          "max_iter": MAX_ITER,
+          "max_iter_fkm": MAX_ITER_FKM,
+          "steps_without_improvements": STEPS_WITHOUT_IMPROVEMENTS}
 
 # Train models
-trained_models = Parallel(n_jobs=N_KERNELS, batch_size=1, verbose=20)(
+configs = list(product(MODELTYPE.all(),
+                       P,
+                       range(REPETITIONS),
+                       N_CLIENTS_PER_ROUND))
+if SHUFFLE_TRAINING_ORDER:
+    random.shuffle(configs)  # For a more precise time estimate
+total = len(configs)
+
+trained_models_iterator = Parallel(n_jobs=N_KERNELS, batch_size=1, verbose=0, return_as="generator_unordered")(
     delayed(get_trained_model)(model_type=model_type,
                                p=p,
                                model_number=model_number,
                                n_clients_per_round=n_clients_per_round,
-                               **args)
+                               **kwargs)
     for
     model_type, p, model_number, n_clients_per_round
     in
-    product(MODELTYPE.all(),
-            P,
-            range(REPETITIONS),
-            N_CLIENTS_PER_ROUND))
+    configs)
 
 # Convert the result to a dictionary
-model_dict = {(model_type, p, model_number, n_clients_per_round): trained_models[i] for
-              i, (model_type, p, model_number, n_clients_per_round) in
-              enumerate(product(MODELTYPE.all(),
-                                P,
-                                range(REPETITIONS),
-                                N_CLIENTS_PER_ROUND)
-                        )
-              }
+model_dict = {}
+for model, config in (tqdm_iterator := tqdm(trained_models_iterator, total=total)):
+    model_type, p, model_number, n_clients_per_round = list(config.values())
+    model_dict[(model_type, p, model_number, n_clients_per_round)] = model
+    tqdm_iterator.set_postfix(config)
 
 # Compute the scores and store them
 model_type_list = []
@@ -574,37 +582,37 @@ for model_type, p, model_number, n_clients_per_round in tqdm(product(MODELTYPE.a
                          p=p,
                          model_number=model_number,
                          n_clients_per_round=n_clients_per_round,
-                         **args)
+                         **kwargs)
     accuracy = compute_accuracy(model_type=model_type,
                                 p=p,
                                 model_number=model_number,
                                 n_clients_per_round=n_clients_per_round,
-                                **args)
+                                **kwargs)
     v_measure = compute_v_measure(model_type=model_type,
                                   p=p,
                                   model_number=model_number,
                                   n_clients_per_round=n_clients_per_round,
-                                  **args)
+                                  **kwargs)
     homogeneity = compute_homogeneity(model_type=model_type,
                                       p=p,
                                       model_number=model_number,
                                       n_clients_per_round=n_clients_per_round,
-                                      **args)
+                                      **kwargs)
     completeness = compute_completeness(model_type=model_type,
                                         p=p,
                                         model_number=model_number,
                                         n_clients_per_round=n_clients_per_round,
-                                        **args)
+                                        **kwargs)
     nmi = compute_nmi(model_type=model_type,
                       p=p,
                       model_number=model_number,
                       n_clients_per_round=n_clients_per_round,
-                      **args)
+                      **kwargs)
     kappa = compute_kappa(model_type=model_type,
                           p=p,
                           model_number=model_number,
                           n_clients_per_round=n_clients_per_round,
-                          **args)
+                          **kwargs)
     model_type_list.append(model_type)
     p_list.append(p)
     model_number_list.append(model_number)
