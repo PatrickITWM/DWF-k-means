@@ -19,6 +19,7 @@ def distribute_to_clients(X: np.ndarray,
                           p: float,
                           with_replacement=False,
                           clusters_to_clients_evenly_distributed=False,
+                          reassign_too_small_clusters=True,
                           seed: int = 1024,
                           verbose: bool = False):
     """
@@ -43,7 +44,7 @@ def distribute_to_clients(X: np.ndarray,
         Proportion of data points to be allocated from clusters designated for specific clients.
         p=0 corresponds to uniform distribution across clients. p=1 assigns each client data from a single cluster.
         More specifically, the number of data points from a randomly chosen cluster assigned to each client is given by
-         floor(p * n_samples), The rest is filled with randomly chosen data points from all clusters.
+         floor(p * n_samples); The rest is filled with randomly chosen data points from all clusters.
 
     with_replacement : bool, default False
         Whether to allow replacement when selecting data items from the clusters or remaining samples.
@@ -52,6 +53,10 @@ def distribute_to_clients(X: np.ndarray,
         Whether the clusters are distributed evenly across clients or totally random.
         If False, the clusters are totally randomly selected, if true, each cluster is used
         n_clients // n_clusters or nn_clients // n_clusters + 1 times.
+
+    reassign_too_small_clusters: bool, default True
+        While distributing data to clients, if a cluster is too small such that it contains less data as needed according to the p value,
+        reassign a new cluster to the client. If false, the cluster is not reassigned and a Value error is thrown in case of a too small cluster.
 
     seed : int, default 1024
         The random seed used for reproducible data distribution.
@@ -79,8 +84,7 @@ def distribute_to_clients(X: np.ndarray,
     n_clusters = len(cluster_indexes)
     sizes_selected_cluster = [math.floor(p * s) for s in clients_data_sizes]
     sizes_rest = [math.ceil((1 - p) * s) for s in clients_data_sizes]
-    X_splitted_into_clusters = {cluster_idx: X[y == cluster_idx].copy() for cluster_idx in cluster_indexes}
-
+    X_splitted_into_clusters = {idx: X[y == cluster_indexes[idx]].copy() for idx in list(range(n_clusters))}
     #
     clients_data = []
 
@@ -88,24 +92,14 @@ def distribute_to_clients(X: np.ndarray,
     if not with_replacement and len(X) < sum(clients_data_sizes):
         raise ValueError("Not enough data points to distribute to clients.")
 
-    # Choose a cluster for each client
-    if clusters_to_clients_evenly_distributed:
-        max_usage_of_cluster = n_clients // n_clusters  + 1
-        selected_cluster_per_client = random.sample(max_usage_of_cluster * cluster_indexes, k=n_clients)
-    else:
-        selected_cluster_per_client = random.choices(cluster_indexes, k=n_clients)
+    selected_cluster_per_client = _choose_cluster_for_each_client(clusters_to_clients_evenly_distributed,
+                                                                  n_clients,
+                                                                  n_clusters)
     # Distribute data from the selected cluster to the client
     for client in (trange(n_clients) if verbose else range(n_clients)):
-        selected_cluster = selected_cluster_per_client[client]
-        size = sizes_selected_cluster[client]
-        X_selected_cluster = X_splitted_into_clusters[selected_cluster]
-        if X_selected_cluster.shape[0] < size:
-            raise ValueError(
-                f"Not enough data points in cluster {selected_cluster} to distribute to client {client}. Available data points: {X_selected_cluster.shape[0]}, size: {size}")
-        index = np.random.choice(X_selected_cluster.shape[0], size=size, replace=with_replacement)
-        clients_data.append(X_selected_cluster[index].copy())
-        if not with_replacement:
-            X_splitted_into_clusters[selected_cluster] = np.delete(X_selected_cluster, index, axis=0)
+        _distribute_cluster_data_to_client(X_splitted_into_clusters, client, clients_data, n_clusters,
+                                           reassign_too_small_clusters, selected_cluster_per_client,
+                                           sizes_selected_cluster, with_replacement)
     # Collect the remaining data in a single array again
     X_remainder = np.concatenate(list(X_splitted_into_clusters.values()), axis=0)
     # Distribute the remaining data to the clients
@@ -120,6 +114,94 @@ def distribute_to_clients(X: np.ndarray,
     for client in range(n_clients):
         clients_data[client] = shuffle(clients_data[client], random_state=seed + client)
     return clients_data
+
+
+def _distribute_cluster_data_to_client(
+        X_splitted_into_clusters: dict[int, np.ndarray],
+        client: int,
+        clients_data: list[np.ndarray],
+        n_clusters: int,
+        reassign_too_small_clusters: bool,
+        selected_cluster_per_client: list[int],
+        sizes_selected_cluster: list[int],
+        with_replacement: bool
+) -> None:
+    """
+    Distributes cluster data to a specified client based on parameters provided. Operates inplace.
+
+    Parameters:
+        X_splitted_into_clusters (dict[int, np.ndarray]): A dictionary where keys represent
+            cluster indices and values are arrays containing the data points assigned to the given cluster.
+        client (int): Index of the client to receive distributed data.
+        clients_data (list[np.ndarray]): A list that accumulates data arrays corresponding
+            to each client.
+        n_clusters (int): Total number of clusters from which data can be retrieved.
+        reassign_too_small_clusters (bool): Flag indicating whether to reassign data from
+            other clusters if the initially selected cluster is too small.
+        selected_cluster_per_client (list[int]): A list where each entry specifies the
+            primary cluster allocated to each client.
+        sizes_selected_cluster (list[int]): A list of required sizes for the selected cluster
+            data for each client.
+        with_replacement (bool): Whether to sample the data points with replacement.
+
+    Raises:
+        ValueError: If the cluster data is insufficient, either because all clusters are
+            too small or because the selected cluster does not have enough data points.
+
+    Returns:
+        None
+    """
+    size = sizes_selected_cluster[client]
+    selected_cluster = selected_cluster_per_client[client]
+    if reassign_too_small_clusters:
+        for shift in range(n_clusters):
+            X_selected_cluster = X_splitted_into_clusters[(selected_cluster + shift) % n_clusters]
+            if X_selected_cluster.shape[0] >= size:
+                break
+        else:
+            raise ValueError(
+                f"All clusters contain less data points than needed for client {client}. Needed: {size}")
+    else:
+        X_selected_cluster = X_splitted_into_clusters[selected_cluster]
+        if X_selected_cluster.shape[0] < size:
+            raise ValueError(
+                f"Not enough data points in cluster {selected_cluster} to distribute to client {client}. Available data points: {X_selected_cluster.shape[0]}, size: {size}")
+    index = np.random.choice(X_selected_cluster.shape[0], size=size, replace=with_replacement)
+    clients_data.append(X_selected_cluster[index].copy())
+    if not with_replacement:
+        X_splitted_into_clusters[selected_cluster] = np.delete(X_selected_cluster, index, axis=0)
+
+
+def _choose_cluster_for_each_client(clusters_to_clients_evenly_distributed: bool, n_clients: int, n_clusters: int) -> \
+        list[int]:
+    """
+    Choose a cluster for each client based on the specified distribution rules.
+
+    If clusters are intended to be evenly distributed among clients, the function ensures that
+    the distribution adheres to the closest possible even allocation. Otherwise, the function
+    randomly assigns clusters to clients based on uniform probabilities.
+
+    Parameters
+    ----------
+    clusters_to_clients_evenly_distributed : bool
+        Whether the clusters should be evenly distributed among the clients.
+    n_clients : int
+        The number of clients among which clusters need to be assigned.
+    n_clusters : int
+        The number of clusters available for assignment.
+
+    Returns
+    -------
+    list[int]
+        A list where each element represents the assigned cluster ID for the corresponding client.
+    """
+    # Choose a cluster for each client
+    if clusters_to_clients_evenly_distributed:
+        max_usage_of_cluster = n_clients // n_clusters + 1
+        selected_cluster_per_client = random.sample(max_usage_of_cluster * list(range(n_clusters)), k=n_clients)
+    else:
+        selected_cluster_per_client = random.choices(list(range(n_clusters)), k=n_clients)
+    return selected_cluster_per_client
 
 
 def create_plot(ax: Axes,
