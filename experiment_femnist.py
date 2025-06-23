@@ -153,7 +153,7 @@ def get_trained_ewf_k_means(experiment_name: str,
 @memory.cache
 def get_trained_dwf_k_means(experiment_name: str,
                             model_number: int,
-                            data_distribution: str,
+                            p: float,
                             k: int,
                             n_clients: int,
                             n_clients_per_round: int,
@@ -193,7 +193,7 @@ def get_trained_dwf_k_means(experiment_name: str,
 @memory.cache
 def get_trained_k_fed(experiment_name: str,
                       model_number: int,
-                      data_distribution: str,
+                      p: float,
                       k: int,
                       n_clients: int,
                       n_clients_per_round: int,
@@ -223,7 +223,7 @@ def get_trained_k_fed(experiment_name: str,
 @memory.cache
 def get_trained_fkm(experiment_name: str,
                     model_number: int,
-                    data_distribution: str,
+                    p: float,
                     k: int,
                     n_clients: int,
                     n_clients_per_round: int,
@@ -517,8 +517,8 @@ trained_models = Parallel(n_jobs=N_KERNELS, batch_size=1, verbose=20)(
             N_CLIENTS_PER_ROUND))
 
 # Convert the result to a dictionary
-model_dict = {(model_type, data_distribution, model_number, n_clients_per_round): trained_models[i] for
-              i, (model_type, data_distribution, model_number, n_clients_per_round) in
+model_dict = {(model_type, p, model_number, n_clients_per_round): trained_models[i] for
+              i, (model_type, p, model_number, n_clients_per_round) in
               enumerate(product(MODELTYPE.all(),
                                 P,
                                 range(REPETITIONS),
