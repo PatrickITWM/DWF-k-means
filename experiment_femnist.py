@@ -534,7 +534,10 @@ for model, config in (tqdm_iterator := tqdm(trained_models_iterator, total=total
     model_type, p, model_number, n_clients_per_round = list(config.values())
     progress_dict[model_type] += 1
     model_dict[(model_type, p, model_number, n_clients_per_round)] = model
-    tqdm_iterator.set_postfix(config | progress_dict)
+    if SHUFFLE_TRAINING_ORDER:
+        tqdm_iterator.set_postfix(progress_dict)
+    else:
+        tqdm_iterator.set_postfix(config)
     tqdm_iterator.set_description(EXPERIMENT)
 
 # Compute the scores and store them
