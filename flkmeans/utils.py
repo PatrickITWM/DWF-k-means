@@ -10,9 +10,6 @@ from sklearn.utils import shuffle
 from tqdm.auto import trange
 
 
-# plt.style.use('seaborn-dark')
-
-
 def distribute_to_clients(X: np.ndarray,
                           y: np.ndarray,
                           clients_data_sizes: list[int],

@@ -550,10 +550,13 @@ trained_models_iterator = Parallel(n_jobs=N_KERNELS, batch_size=1, verbose=0, re
 
 # Convert the result to a dictionary
 model_dict = {}
+progress_dict = {mt: 0 for mt in MODELTYPE.all()}
 for model, config in (tqdm_iterator := tqdm(trained_models_iterator, total=total)):
     model_type, p, model_number, n_clients_per_round = list(config.values())
+    progress_dict[model_type] += 1
     model_dict[(model_type, p, model_number, n_clients_per_round)] = model
-    tqdm_iterator.set_postfix(config)
+    tqdm_iterator.set_postfix(config | progress_dict)
+    tqdm_iterator.set_description(EXPERIMENT)
 
 # Compute the scores and store them
 model_type_list = []
