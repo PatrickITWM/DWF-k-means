@@ -543,6 +543,11 @@ for model, config in (tqdm_iterator := tqdm(trained_models_iterator, total=total
     tqdm_iterator.set_description(EXPERIMENT)
 
 # Compute the scores and store them
+configs = list(product(MODELTYPE.all(),
+                       P,
+                       range(REPETITIONS),
+                       N_CLIENTS_PER_ROUND))  # In standard order again
+
 model_type_list = []
 p_list = []
 model_number_list = []
@@ -554,6 +559,7 @@ homogeneity_list = []
 completeness_list = []
 nmi_list = []
 kappa_list = []
+
 
 def get_metrics(
         model_type: str,
@@ -610,7 +616,8 @@ metrics_iterator = Parallel(n_jobs=N_KERNELS, batch_size=1, verbose=0, return_as
     in
     configs)
 
-for metrics, (model_type, p, model_number, n_clients_per_round) in tqdm(zip(metrics_iterator, configs), total=total):
+for metrics, (model_type, p, model_number, n_clients_per_round) in (
+        tqdm_iterator := tqdm(zip(metrics_iterator, configs), total=total)):
     loss, accuracy, v_measure, homogeneity, completeness, nmi, kappa = metrics
     model_type_list.append(model_type)
     p_list.append(p)
@@ -623,6 +630,8 @@ for metrics, (model_type, p, model_number, n_clients_per_round) in tqdm(zip(metr
     completeness_list.append(completeness)
     nmi_list.append(nmi)
     kappa_list.append(kappa)
+    tqdm_iterator.set_description(f"{EXPERIMENT}: Compute metrics")
+    tqdm_iterator.set_postfix(config)
 
 df = pd.DataFrame({"Model": model_type_list,
                    "p": p_list,
