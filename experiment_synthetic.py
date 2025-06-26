@@ -40,7 +40,7 @@ SHUFFLE_TRAINING_ORDER = True  # Only relevant for the order in which all models
 EXPERIMENT = "SYNTHETIC"
 K = 5
 # -------------------------------------
-N_CLIENTS = 100  # Ignored for FEMNIST
+N_CLIENTS = 100
 N_CLIENTS_PER_ROUND = range(10, 101, 10)
 P = [0.0, 0.25, 0.5, 0.75, 1.0]
 TOL_GLOBAL = 10 ** (-8)
@@ -650,7 +650,10 @@ for metrics, (model_type, p, model_number, n_clients_per_round) in (
     nmi_list.append(nmi)
     kappa_list.append(kappa)
     tqdm_iterator.set_description(f"{EXPERIMENT}: Compute metrics")
-    tqdm_iterator.set_postfix(config)
+    tqdm_iterator.set_postfix({"model_type": model_type,
+                               "p": p,
+                               "model_number": model_number,
+                               "n_clients_per_round": n_clients_per_round})
 
 df = pd.DataFrame({"Model": model_type_list,
                    "p": p_list,

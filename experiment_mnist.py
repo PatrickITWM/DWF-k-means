@@ -631,7 +631,10 @@ for metrics, (model_type, p, model_number, n_clients_per_round) in (
     nmi_list.append(nmi)
     kappa_list.append(kappa)
     tqdm_iterator.set_description(f"{EXPERIMENT}: Compute metrics")
-    tqdm_iterator.set_postfix(config)
+    tqdm_iterator.set_postfix({"model_type": model_type,
+                               "p": p,
+                               "model_number": model_number,
+                               "n_clients_per_round": n_clients_per_round})
 
 df = pd.DataFrame({"Model": model_type_list,
                    "p": p_list,
