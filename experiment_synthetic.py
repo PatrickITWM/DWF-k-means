@@ -35,6 +35,7 @@ memory = Memory("savepoints", verbose=0)
 RESULT_PATH = Path("experiments")
 # -------------------------------------
 N_KERNELS = -1
+N_KERNELS_METRICS = 15
 SHUFFLE_TRAINING_ORDER = True  # Only relevant for the order in which all models are trained. If true, better time estimate.
 # -------------------------------------
 EXPERIMENT = "SYNTHETIC"
@@ -624,7 +625,7 @@ def get_metrics(
     return loss, accuracy, v_measure, homogeneity, completeness, nmi, kappa
 
 
-metrics_iterator = Parallel(n_jobs=N_KERNELS, batch_size=1, verbose=0, return_as="generator")(
+metrics_iterator = Parallel(n_jobs=N_KERNELS_METRICS, batch_size=1, verbose=0, return_as="generator")(
     delayed(get_metrics)(model_type=model_type,
                          p=p,
                          model_number=model_number,
