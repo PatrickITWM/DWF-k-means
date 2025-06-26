@@ -553,16 +553,12 @@ completeness_list = []
 nmi_list = []
 kappa_list = []
 
-total_combinations = len(list(product(MODELTYPE.all(),
-                                      P,
-                                      range(REPETITIONS),
-                                      N_CLIENTS_PER_ROUND)))
-
-for model_type, p, model_number, n_clients_per_round in tqdm(product(MODELTYPE.all(),
-                                                                     P,
-                                                                     range(REPETITIONS),
-                                                                     N_CLIENTS_PER_ROUND),
-                                                             total=total_combinations):
+def get_metrics(
+        model_type: str,
+        p: float,
+        model_number: int,
+        n_clients_per_round: int,
+        **kwargs) -> tuple[float, float, float, float, float, float, float]:
     loss = compute_score(model_type=model_type,
                          p=p,
                          model_number=model_number,
@@ -598,6 +594,22 @@ for model_type, p, model_number, n_clients_per_round in tqdm(product(MODELTYPE.a
                           model_number=model_number,
                           n_clients_per_round=n_clients_per_round,
                           **kwargs)
+    return loss, accuracy, v_measure, homogeneity, completeness, nmi, kappa
+
+
+metrics_iterator = Parallel(n_jobs=N_KERNELS, batch_size=1, verbose=0, return_as="generator")(
+    delayed(get_metrics)(model_type=model_type,
+                         p=p,
+                         model_number=model_number,
+                         n_clients_per_round=n_clients_per_round,
+                         **kwargs)
+    for
+    model_type, p, model_number, n_clients_per_round
+    in
+    configs)
+
+for metrics, (model_type, p, model_number, n_clients_per_round) in tqdm(zip(metrics_iterator, configs), total=total):
+    loss, accuracy, v_measure, homogeneity, completeness, nmi, kappa = metrics
     model_type_list.append(model_type)
     p_list.append(p)
     model_number_list.append(model_number)
