@@ -584,8 +584,7 @@ def get_metrics(
         model_type: str,
         p: float,
         model_number: int,
-        n_clients_per_round: int,
-        **kwargs) -> tuple[float, float, float, float, float, float, float]:
+        n_clients_per_round: int) -> tuple[float, float, float, float, float, float, float]:
     loss = compute_score(model_type=model_type,
                          p=p,
                          model_number=model_number,
@@ -626,7 +625,9 @@ def get_metrics(
 
 for config in (tqdm_iterator := tqdm(configs, total=total)):
     model_type, p, model_number, n_clients_per_round = config
-    metrics = get_metrics(model_type=model_type, p=p, model_number=model_number,
+    metrics = get_metrics(model_type=model_type,
+                          p=p,
+                          model_number=model_number,
                           n_clients_per_round=n_clients_per_round)
     loss, accuracy, v_measure, homogeneity, completeness, nmi, kappa = metrics
     model_type_list.append(model_type)

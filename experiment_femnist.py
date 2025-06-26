@@ -563,8 +563,7 @@ def get_metrics(
         model_type: str,
         p: float,
         model_number: int,
-        n_clients_per_round: int,
-        **kwargs) -> tuple[float, float, float, float, float, float, float]:
+        n_clients_per_round: int) -> tuple[float, float, float, float, float, float, float]:
     loss = compute_score(model_type=model_type,
                          p=p,
                          model_number=model_number,
